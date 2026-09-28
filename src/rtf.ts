@@ -1,5 +1,48 @@
 export type RtfFormatting={bold:number;italic:number;underline:number;font:number;fontSize:number;foregroundColor:number;backgroundColor:number;alignLeft:number;alignCenter:number;alignRight:number;alignJustify:number;paragraphs:number;lists:number}
-export type RtfStats={rawBytes:number;controlWords:number;groups:number;hexEscapes:number;unicodeEscapes:number;pictures:number;objects:number;fontTableChars:number;colorTableChars:number;plainText:string;formatting:RtfFormatting}
+
+export type RtfRunStyle={bold:boolean;italic:boolean;underline:boolean;font:number|null;fontSizeHalfPoints:number|null;foregroundColor:number|null;backgroundColor:number|null;alignment:'left'|'center'|'right'|'justify'}
+export type RtfRun={text:string;start:number;end:number;style:RtfRunStyle}
+const defaultStyle=():RtfRunStyle=>({bold:false,italic:false,underline:false,font:null,fontSizeHalfPoints:null,foregroundColor:null,backgroundColor:null,alignment:'left'})
+const sameStyle=(a:RtfRunStyle,b:RtfRunStyle)=>JSON.stringify(a)===JSON.stringify(b)
+export function parseRtfRuns(raw:string):RtfRun[]{
+ const runs:RtfRun[]=[]; const stack:{style:RtfRunStyle;skip:boolean}[]=[]; let style=defaultStyle(),skip=false,pos=0,i=0
+ const emit=(s:string)=>{if(!s||skip)return; const last=runs[runs.length-1]; if(last&&sameStyle(last.style,style)&&last.end===pos){last.text+=s;last.end+=s.length}else runs.push({text:s,start:pos,end:pos+s.length,style:{...style}});pos+=s.length}
+ while(i<raw.length){
+  const ch=raw[i]
+  if(ch==='{'){stack.push({style:{...style},skip});i++;continue}
+  if(ch==='}'){const prev=stack.pop();if(prev){style=prev.style;skip=prev.skip}i++;continue}
+  if(ch!=='\\'){emit(ch);i++;continue}
+  if(i+1>=raw.length){i++;continue}
+  const n=raw[i+1]
+  if(n==='\\'||n==='{'||n==='}'){emit(n);i+=2;continue}
+  if(n==="'"){const h=raw.slice(i+2,i+4);if(/^[0-9a-f]{2}$/i.test(h)){emit(String.fromCharCode(parseInt(h,16)));i+=4;continue}}
+  if(n==='*'){skip=true;i+=2;continue}
+  const m=raw.slice(i).match(/^\\([a-z]+)(-?\d+)? ?/i)
+  if(!m){i+=2;continue}
+  const word=m[1].toLowerCase(), param=m[2]===undefined?null:Number(m[2]); i+=m[0].length
+  if(['fonttbl','colortbl','stylesheet','info','pict','object','header','footer'].includes(word)){skip=true;continue}
+  if(word==='b')style.bold=param!==0
+  else if(word==='i')style.italic=param!==0
+  else if(word==='ul')style.underline=param!==0
+  else if(word==='ulnone')style.underline=false
+  else if(word==='f'&&param!==null)style.font=param
+  else if(word==='fs'&&param!==null)style.fontSizeHalfPoints=param
+  else if(word==='cf'&&param!==null)style.foregroundColor=param
+  else if((word==='highlight'||word==='cb')&&param!==null)style.backgroundColor=param
+  else if(word==='ql')style.alignment='left'
+  else if(word==='qc')style.alignment='center'
+  else if(word==='qr')style.alignment='right'
+  else if(word==='qj')style.alignment='justify'
+  else if(word==='plain')style={...defaultStyle(),alignment:style.alignment}
+  else if(word==='pard')style={...style,alignment:'left'}
+  else if(word==='par'||word==='line')emit('\n')
+  else if(word==='tab')emit('\t')
+  else if(word==='u'&&param!==null){emit(String.fromCharCode((param+65536)%65536)); if(i<raw.length&&raw[i]!=='\\'&&raw[i]!=='{'&&raw[i]!=='}')i++}
+ }
+ return runs.filter(r=>r.text.length>0)
+}
+
+export type RtfStats={rawBytes:number;controlWords:number;groups:number;hexEscapes:number;unicodeEscapes:number;pictures:number;objects:number;fontTableChars:number;colorTableChars:number;plainText:string;formatting:RtfFormatting;runs:RtfRun[]}
 const count=(s:string,r:RegExp)=>(s.match(r)||[]).length
 export function inspectRtf(raw:string,rawBytes:number):RtfStats{
  const table=(name:string)=>{const m=raw.match(new RegExp('\\\\'+name+'[\\s\\S]*?\\}')); return m?.[0].length||0}
@@ -11,7 +54,7 @@ export function inspectRtf(raw:string,rawBytes:number):RtfStats{
   .replace(/\\'([0-9a-f]{2})/gi,(_,h)=>String.fromCharCode(parseInt(h,16)))
   .replace(/\\[a-z]+-?\d* ?/gi,'').replace(/\\[{}\\]/g,m=>m.slice(1)).replace(/[{}]/g,'')
  const formatting:RtfFormatting={bold:count(raw,/\\b(?:0)?\b/g),italic:count(raw,/\\i(?:0)?\b/g),underline:count(raw,/\\ul(?:none|0)?\b/g),font:count(raw,/\\f\d+\b/g),fontSize:count(raw,/\\fs\d+\b/g),foregroundColor:count(raw,/\\cf\d+\b/g),backgroundColor:count(raw,/\\(?:highlight|cb)\d+\b/g),alignLeft:count(raw,/\\ql\b/g),alignCenter:count(raw,/\\qc\b/g),alignRight:count(raw,/\\qr\b/g),alignJustify:count(raw,/\\qj\b/g),paragraphs:count(raw,/\\par\b/g),lists:count(raw,/\\(?:listtext|ls\d+)\b/g)}
- return {rawBytes,controlWords:count(raw,/\\[a-z]+-?\d* ?/gi),groups:count(raw,/\{/g),hexEscapes:count(raw,/\\'[0-9a-f]{2}/gi),unicodeEscapes:count(raw,/\\u-?\d+\??/gi),pictures:count(raw,/\\pict\b/gi),objects:count(raw,/\\object\b/gi),fontTableChars:table('fonttbl'),colorTableChars:table('colortbl'),plainText:plain.trim(),formatting}
+ return {rawBytes,controlWords:count(raw,/\\[a-z]+-?\d* ?/gi),groups:count(raw,/\{/g),hexEscapes:count(raw,/\\'[0-9a-f]{2}/gi),unicodeEscapes:count(raw,/\\u-?\d+\??/gi),pictures:count(raw,/\\pict\b/gi),objects:count(raw,/\\object\b/gi),fontTableChars:table('fonttbl'),colorTableChars:table('colortbl'),plainText:plain.trim(),formatting,runs:parseRtfRuns(raw)}
 }
 
 export type RtfComparison={formattingChanges:string[];rawByteDelta:number;visibleUtf8Delta:number;visibleGraphemeDelta:number;controlWordDelta:number;groupDelta:number;unicodeEscapeDelta:number;hexEscapeDelta:number;pictureDelta:number;objectDelta:number;fontTableDelta:number;colorTableDelta:number;lessons:string[]}
