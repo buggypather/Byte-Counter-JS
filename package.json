@@ -1,1 +1,17 @@
-{"scripts":{"dev":"vite","build":"vue-tsc -b && vite build"},"dependencies":{"@vitejs/plugin-vue":"latest","vite":"latest","vue":"latest"},"devDependencies":{"typescript":"latest","vue-tsc":"latest"}}
+{
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "vite": "latest",
+    "vue": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "vue-tsc": "latest",
+    "vitest": "latest"
+  }
+}
