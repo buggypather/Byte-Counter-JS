@@ -1,6 +1,6 @@
 import {parseRtfTree,type RtfNode,type RtfDiagnostic} from './rtfParser'
 import type {RtfToken} from './rtfLexer'
-export type RtfModelFont={index:number;name:string;sourceStart:number;sourceEnd:number}
+export type RtfModelFont={index:number;name:string;charset:number|null;codePage:number|null;sourceStart:number;sourceEnd:number}
 export type RtfModelColor={index:number;red:number;green:number;blue:number;sourceStart:number;sourceEnd:number}
 export type RtfListLevel={level:number;numberFormat:number|null;numberFormatName:string;startAt:number|null;levelText:string|null;sourceStart:number;sourceEnd:number}
 export type RtfListDefinition={listId:number;templateId:number|null;levels:RtfListLevel[];sourceStart:number;sourceEnd:number}
@@ -19,7 +19,7 @@ export type RtfModelRun={computedStyle?:RtfComputedStyle;cascade?:Partial<Record
 export type RtfParagraph={index:number;start:number;end:number;sourceStart:number;sourceEnd:number;runs:RtfModelRun[];alignment:RtfComputedStyle['alignment']}
 export type RtfDestination={name:string;sourceStart:number;sourceEnd:number;ignorable:boolean}
 export type RtfModel={source:string;paragraphs:RtfParagraph[];runs:RtfModelRun[];destinations:RtfDestination[];fonts:RtfModelFont[];colors:RtfModelColor[];lists:RtfListDefinition[];listOverrides:RtfListOverride[];styles:RtfNamedStyle[];diagnostics:RtfDiagnostic[]}
-type State={style:RtfComputedStyle;origins:Partial<Record<RtfStyleProperty,RtfPropertyOrigin>>;history:Partial<Record<RtfStyleProperty,RtfProvenanceEvent[]>>;groupStart:number;groupEnd:number|null;skip:boolean;destination:string|null;uc:number;unicodeFallback:number}
+type State={style:RtfComputedStyle;origins:Partial<Record<RtfStyleProperty,RtfPropertyOrigin>>;history:Partial<Record<RtfStyleProperty,RtfProvenanceEvent[]>>;groupStart:number;groupEnd:number|null;skip:boolean;destination:string|null;uc:number;unicodeFallback:number;codePage:number}
 const base=():RtfComputedStyle=>({bold:false,italic:false,underline:false,font:null,fontSizeHalfPoints:null,foregroundColor:null,backgroundColor:null,alignment:'left',leftIndentTwips:0,rightIndentTwips:0,firstLineIndentTwips:0,spaceBeforeTwips:0,spaceAfterTwips:0,lineSpacingTwips:null,tabStopsTwips:[],listOverride:null,listLevel:null,paragraphStyle:null,characterStyle:null})
 const destinationWords=new Set(['fonttbl','colortbl','stylesheet','info','pict','object','header','footer','headerl','headerr','footerl','footerr','listtable','listoverridetable','generator'])
 const cloneStyle=(s:RtfComputedStyle):RtfComputedStyle=>({...s,tabStopsTwips:[...s.tabStopsTwips]})
@@ -29,7 +29,7 @@ const origin=(state:State,property:RtfStyleProperty,value:RtfComputedStyle[RtfSt
 export function buildRtfModel(source:string):RtfModel{
  const tree=parseRtfTree(source),runs:RtfModelRun[]=[],destinations:RtfDestination[]=[];let textPos=0
  const emit=(text:string,tokens:RtfToken[],style:RtfComputedStyle,origins:State['origins'],history:State['history'])=>{if(!text)return;const ss=tokens[0]?.start??0,se=tokens.at(-1)?.end??ss,last=runs.at(-1);if(last&&same(last.style,style)&&sameOrigins(last.origins,origins)&&last.end===textPos&&last.sourceEnd===ss){last.text+=text;last.end+=text.length;last.sourceEnd=se;last.sourceTokens.push(...tokens)}else runs.push({text,start:textPos,end:textPos+text.length,sourceStart:ss,sourceEnd:se,style:cloneStyle(style),origins:{...origins},history:Object.fromEntries(Object.entries(history).map(([k,v])=>[k,[...(v||[])]])),sourceTokens:[...tokens]});textPos+=text.length}
- const walk=(nodes:RtfNode[],incoming:State)=>{const state:State={style:cloneStyle(incoming.style),origins:{...incoming.origins},history:Object.fromEntries(Object.entries(incoming.history).map(([k,v])=>[k,[...(v||[])]])),groupStart:incoming.groupStart,groupEnd:incoming.groupEnd,skip:incoming.skip,destination:incoming.destination,uc:incoming.uc,unicodeFallback:incoming.unicodeFallback};let star=false
+ const walk=(nodes:RtfNode[],incoming:State)=>{const state:State={style:cloneStyle(incoming.style),origins:{...incoming.origins},history:Object.fromEntries(Object.entries(incoming.history).map(([k,v])=>[k,[...(v||[])]])),groupStart:incoming.groupStart,groupEnd:incoming.groupEnd,skip:incoming.skip,destination:incoming.destination,uc:incoming.uc,unicodeFallback:incoming.unicodeFallback,codePage:incoming.codePage};let star=false
   for(const node of nodes){
    if(node.type==='group'){const before=destinations.length;const child:State={...state,style:cloneStyle(state.style),origins:{...state.origins},history:Object.fromEntries(Object.entries(state.history).map(([k,v])=>[k,[...(v||[])]])),groupStart:node.start,groupEnd:node.end};const completed=walk(node.children,child);if(!node.unclosed&&node.close)for(const property of Object.keys(state.style) as RtfStyleProperty[]){if(completed.style[property]!==state.style[property])state.history[property]=[...(state.history[property]||[]),{property,value:state.style[property],previousValue:completed.style[property],control:node.close.raw,sourceStart:node.close.start,sourceEnd:node.close.end,kind:'restored',groupStart:node.start,groupEnd:node.end}]}for(let di=before;di<destinations.length;di++)if(destinations[di].sourceEnd===destinations[di].sourceStart||destinations[di].sourceEnd===node.children[0]?.end)destinations[di].sourceEnd=node.end;continue}
    const t=node.token
@@ -39,6 +39,7 @@ export function buildRtfModel(source:string):RtfModel{
     if(destinationWords.has(w)){state.destination=w;state.skip=true;destinations.push({name:w,sourceStart:t.start,sourceEnd:t.end,ignorable:star});star=false;continue}
     if(star){state.destination=w;state.skip=true;destinations.push({name:w,sourceStart:t.start,sourceEnd:t.end,ignorable:true});star=false;continue}
     if(w==='uc'&&p!=null){state.uc=Math.max(0,p);continue}
+    if(w==='ansi'){state.codePage=1252;continue}if(w==='mac'){state.codePage=10000;continue}if(w==='pc'){state.codePage=437;continue}if(w==='pca'){state.codePage=850;continue}if(w==='ansicpg'&&p!=null){state.codePage=p;continue}
     if(state.skip)continue
     if(w==='b'){state.style.bold=p!==0;origin(state,'bold',state.style.bold,t)}else if(w==='i'){state.style.italic=p!==0;origin(state,'italic',state.style.italic,t)}else if(w==='ul'){state.style.underline=p!==0;origin(state,'underline',state.style.underline,t)}else if(w==='ulnone'){state.style.underline=false;origin(state,'underline',false,t)}
     else if(w==='f'&&p!=null){state.style.font=p;origin(state,'font',p,t)}else if(w==='fs'&&p!=null){state.style.fontSizeHalfPoints=p;origin(state,'fontSizeHalfPoints',p,t)}else if(w==='cf'&&p!=null){state.style.foregroundColor=p;origin(state,'foregroundColor',p,t)}else if((w==='highlight'||w==='cb')&&p!=null){state.style.backgroundColor=p;origin(state,'backgroundColor',p,t)}
@@ -50,12 +51,12 @@ export function buildRtfModel(source:string):RtfModel{
     continue
    }
    if(state.skip)continue
-   if(t.type==='hex-byte')emit(String.fromCharCode(t.hex!),[t],state.style,state.origins,state.history)
+   if(t.type==='hex-byte')emit(decodeLegacyByte(t.hex!,state.codePage),[t],state.style,state.origins,state.history)
    else if(t.type==='text')emit(t.raw,[t],state.style,state.origins,state.history)
   }
   return state
  }
- walk(tree.children,{style:base(),origins:{},history:{},groupStart:0,groupEnd:source.length,skip:false,destination:null,uc:1,unicodeFallback:0})
+ walk(tree.children,{style:base(),origins:{},history:{},groupStart:0,groupEnd:source.length,skip:false,destination:null,uc:1,unicodeFallback:0,codePage:1252})
  const paragraphs:RtfParagraph[]=[];let current:RtfModelRun[]=[]
  const flush=()=>{if(!current.length)return;const first=current[0],last=current.at(-1)!;paragraphs.push({index:paragraphs.length,start:first.start,end:last.end,sourceStart:first.sourceStart,sourceEnd:last.sourceEnd,runs:current,alignment:first.style.alignment});current=[]}
  for(const run of runs){current.push(run);if(run.text.includes('\n'))flush()}flush()
@@ -66,8 +67,10 @@ export function buildRtfModel(source:string):RtfModel{
  for(const property of Object.keys(run.history) as RtfStyleProperty[])for(const event of run.history[property]||[]){const ref=referenceFor(property,event.value);if(ref)event.reference=ref}}
  return {source,paragraphs,runs,destinations,fonts,colors,lists,listOverrides,styles,diagnostics:tree.diagnostics}
 }
+const cp1252:Record<number,string>={128:'€',130:'‚',131:'ƒ',132:'„',133:'…',134:'†',135:'‡',136:'ˆ',137:'‰',138:'Š',139:'‹',140:'Œ',142:'Ž',145:'‘',146:'’',147:'“',148:'”',149:'•',150:'–',151:'—',152:'˜',153:'™',154:'š',155:'›',156:'œ',158:'ž',159:'Ÿ'}
+function decodeLegacyByte(byte:number,codePage:number):string{if(codePage===1252)return cp1252[byte]??String.fromCharCode(byte);return String.fromCharCode(byte)}
 function findDestinationGroup(nodes:RtfNode[],name:string):Extract<RtfNode,{type:'group'}>|null{for(const n of nodes)if(n.type==='group'){if(n.children.some(x=>x.type==='token'&&x.token.type==='control-word'&&x.token.word===name))return n;const f=findDestinationGroup(n.children,name);if(f)return f}return null}
-function parseFonts(fontTable:Extract<RtfNode,{type:'group'}>):RtfModelFont[]{const out:RtfModelFont[]=[];for(const group of fontTable.children){if(group.type!=='group')continue;const tokens=directTokens(group),font=tokens.find(t=>t.type==='control-word'&&t.word==='f'&&t.parameter!=null);if(!font||font.parameter==null)continue;const name=tokens.filter(t=>t.type==='text').map(t=>t.raw).join('').split(';',1)[0].trim();out.push({index:font.parameter,name:name||('font '+font.parameter),sourceStart:group.start,sourceEnd:group.end})}return out}
+function parseFonts(fontTable:Extract<RtfNode,{type:'group'}>):RtfModelFont[]{const out:RtfModelFont[]=[];for(const group of fontTable.children){if(group.type!=='group')continue;const tokens=directTokens(group),font=tokens.find(t=>t.type==='control-word'&&t.word==='f'&&t.parameter!=null);if(!font||font.parameter==null)continue;const name=tokens.filter(t=>t.type==='text').map(t=>t.raw).join('').split(';',1)[0].trim();const charset=controlParameter(tokens,'fcharset'),codePage=controlParameter(tokens,'cpg');out.push({index:font.parameter,name:name||('font '+font.parameter),charset,codePage,sourceStart:group.start,sourceEnd:group.end})}return out}
 function parseColors(colorTable:Extract<RtfNode,{type:'group'}>):RtfModelColor[]{const tokens=directTokens(colorTable),out:RtfModelColor[]=[];let index=0,entryStart=colorTable.start,red=0,green=0,blue=0,hasColor=false;for(const token of tokens){if(token.type==='control-word'&&token.parameter!=null){if(token.word==='red'){red=token.parameter;hasColor=true}else if(token.word==='green'){green=token.parameter;hasColor=true}else if(token.word==='blue'){blue=token.parameter;hasColor=true}}if(token.type==='text'){let offset=0;for(const ch of token.raw){offset++;if(ch!==';')continue;if(hasColor)out.push({index,red,green,blue,sourceStart:entryStart,sourceEnd:token.start+offset});index++;entryStart=token.start+offset;red=green=blue=0;hasColor=false}}}return out}
 
 function controlParameter(tokens:RtfToken[],word:string):number|null{const token=tokens.find(t=>t.type==='control-word'&&t.word===word&&t.parameter!=null);return token?.parameter??null}
