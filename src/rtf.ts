@@ -8,25 +8,28 @@ export function parseColorTable(raw:string):RtfColor[]{const g=balancedGroup(raw
 export type RtfFormatting={bold:number;italic:number;underline:number;font:number;fontSize:number;foregroundColor:number;backgroundColor:number;alignLeft:number;alignCenter:number;alignRight:number;alignJustify:number;paragraphs:number;lists:number}
 
 export type RtfRunStyle={bold:boolean;italic:boolean;underline:boolean;font:number|null;fontSizeHalfPoints:number|null;foregroundColor:number|null;backgroundColor:number|null;alignment:'left'|'center'|'right'|'justify'}
-export type RtfRun={text:string;start:number;end:number;style:RtfRunStyle}
+export type RtfControl={word:string;parameter:number|null;sourceStart:number;sourceEnd:number;raw:string;explanation:string}
+export type RtfRun={text:string;start:number;end:number;sourceStart:number;sourceEnd:number;style:RtfRunStyle;controls:RtfControl[]}
 const defaultStyle=():RtfRunStyle=>({bold:false,italic:false,underline:false,font:null,fontSizeHalfPoints:null,foregroundColor:null,backgroundColor:null,alignment:'left'})
 const sameStyle=(a:RtfRunStyle,b:RtfRunStyle)=>JSON.stringify(a)===JSON.stringify(b)
 export function parseRtfRuns(raw:string):RtfRun[]{
- const runs:RtfRun[]=[]; const stack:{style:RtfRunStyle;skip:boolean}[]=[]; let style=defaultStyle(),skip=false,pos=0,i=0
- const emit=(s:string)=>{if(!s||skip)return; const last=runs[runs.length-1]; if(last&&sameStyle(last.style,style)&&last.end===pos){last.text+=s;last.end+=s.length}else runs.push({text:s,start:pos,end:pos+s.length,style:{...style}});pos+=s.length}
+ const runs:RtfRun[]=[]; const stack:{style:RtfRunStyle;skip:boolean;controls:RtfControl[]}[]=[]; let style=defaultStyle(),skip=false,pos=0,i=0,controls:RtfControl[]=[]
+ const emit=(s:string,sourceStart=i,sourceEnd=i+1)=>{if(!s||skip)return; const last=runs[runs.length-1]; if(last&&sameStyle(last.style,style)&&last.end===pos&&last.sourceEnd===sourceStart){last.text+=s;last.end+=s.length;last.sourceEnd=sourceEnd}else runs.push({text:s,start:pos,end:pos+s.length,sourceStart,sourceEnd,style:{...style},controls:[...controls]});pos+=s.length}
  while(i<raw.length){
   const ch=raw[i]
-  if(ch==='{'){stack.push({style:{...style},skip});i++;continue}
-  if(ch==='}'){const prev=stack.pop();if(prev){style=prev.style;skip=prev.skip}i++;continue}
-  if(ch!=='\\'){emit(ch);i++;continue}
+  if(ch==='{'){stack.push({style:{...style},skip,controls:[...controls]});i++;continue}
+  if(ch==='}'){const prev=stack.pop();if(prev){style=prev.style;skip=prev.skip;controls=prev.controls}i++;continue}
+  if(ch!=='\\'){emit(ch,i,i+1);i++;continue}
   if(i+1>=raw.length){i++;continue}
   const n=raw[i+1]
-  if(n==='\\'||n==='{'||n==='}'){emit(n);i+=2;continue}
-  if(n==="'"){const h=raw.slice(i+2,i+4);if(/^[0-9a-f]{2}$/i.test(h)){emit(String.fromCharCode(parseInt(h,16)));i+=4;continue}}
+  if(n==='\\'||n==='{'||n==='}'){emit(n,i,i+2);i+=2;continue}
+  if(n==="'"){const h=raw.slice(i+2,i+4);if(/^[0-9a-f]{2}$/i.test(h)){emit(String.fromCharCode(parseInt(h,16)),i,i+4);i+=4;continue}}
   if(n==='*'){skip=true;i+=2;continue}
   const m=raw.slice(i).match(/^\\([a-z]+)(-?\d+)? ?/i)
   if(!m){i+=2;continue}
-  const word=m[1].toLowerCase(), param=m[2]===undefined?null:Number(m[2]); i+=m[0].length
+  const controlStart=i, word=m[1].toLowerCase(), param=m[2]===undefined?null:Number(m[2]); i+=m[0].length
+  const explain:Record<string,string>={b:'Bold text on/off',i:'Italic text on/off',ul:'Underline text on/off',ulnone:'Underline off',f:'Select font-table entry',fs:'Font size in half-points',cf:'Select foreground color-table entry',highlight:'Select highlight color-table entry',cb:'Select background color-table entry',ql:'Left paragraph alignment',qc:'Center paragraph alignment',qr:'Right paragraph alignment',qj:'Justified paragraph alignment',plain:'Reset character formatting',pard:'Reset paragraph formatting',par:'Paragraph break',line:'Line break',tab:'Tab',u:'Unicode UTF-16 code unit'}
+  if(explain[word]){const ctl={word,parameter:param,sourceStart:controlStart,sourceEnd:i,raw:m[0],explanation:explain[word]}; controls=[...controls.filter(x=>!((['b','i','ul','ulnone','f','fs','cf','highlight','cb','ql','qc','qr','qj'].includes(word))&&x.word===word)),ctl]}
   if(['fonttbl','colortbl','stylesheet','info','pict','object','header','footer'].includes(word)){skip=true;continue}
   if(word==='b')style.bold=param!==0
   else if(word==='i')style.italic=param!==0
@@ -42,9 +45,9 @@ export function parseRtfRuns(raw:string):RtfRun[]{
   else if(word==='qj')style.alignment='justify'
   else if(word==='plain')style={...defaultStyle(),alignment:style.alignment}
   else if(word==='pard')style={...style,alignment:'left'}
-  else if(word==='par'||word==='line')emit('\n')
-  else if(word==='tab')emit('\t')
-  else if(word==='u'&&param!==null){emit(String.fromCharCode((param+65536)%65536)); if(i<raw.length&&raw[i]!=='\\'&&raw[i]!=='{'&&raw[i]!=='}')i++}
+  else if(word==='par'||word==='line')emit('\n',controlStart,i)
+  else if(word==='tab')emit('\t',controlStart,i)
+  else if(word==='u'&&param!==null){emit(String.fromCharCode((param+65536)%65536),controlStart,i); if(i<raw.length&&raw[i]!=='\\'&&raw[i]!=='{'&&raw[i]!=='}')i++}
  }
  return runs.filter(r=>r.text.length>0)
 }
