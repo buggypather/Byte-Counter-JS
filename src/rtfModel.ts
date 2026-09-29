@@ -16,12 +16,12 @@ export function buildRtfModel(source:string):RtfModel{
  const emit=(text:string,tokens:RtfToken[],style:RtfComputedStyle)=>{if(!text)return;const ss=tokens[0]?.start??0,se=tokens.at(-1)?.end??ss,last=runs.at(-1);if(last&&same(last.style,style)&&last.end===textPos&&last.sourceEnd===ss){last.text+=text;last.end+=text.length;last.sourceEnd=se;last.sourceTokens.push(...tokens)}else runs.push({text,start:textPos,end:textPos+text.length,sourceStart:ss,sourceEnd:se,style:{...style},sourceTokens:[...tokens]});textPos+=text.length}
  const walk=(nodes:RtfNode[],incoming:State)=>{const state:State={style:{...incoming.style},skip:incoming.skip,destination:incoming.destination,uc:incoming.uc};let star=false
   for(const node of nodes){
-   if(node.type==='group'){walk(node.children,state);continue}
+   if(node.type==='group'){const before=destinations.length;walk(node.children,state);for(let di=before;di<destinations.length;di++)if(destinations[di].sourceEnd===destinations[di].sourceStart||destinations[di].sourceEnd===node.children[0]?.end)destinations[di].sourceEnd=node.end;continue}
    const t=node.token
    if(t.type==='control-symbol'){if(t.symbol==='*'){star=true;continue}if(!state.skip&&['\\','{','}'].includes(t.symbol||''))emit(t.symbol!,[t],state.style);else if(!state.skip&&t.symbol==='~')emit('\u00a0',[t],state.style);continue}
    if(t.type==='control-word'){const w=t.word!,p=t.parameter
-    if(destinationWords.has(w)){state.destination=w;state.skip=true;destinations.push({name:w,sourceStart:t.start,sourceEnd:node.end,ignorable:star});star=false;continue}
-    if(star){state.destination=w;state.skip=true;destinations.push({name:w,sourceStart:t.start,sourceEnd:node.end,ignorable:true});star=false;continue}
+    if(destinationWords.has(w)){state.destination=w;state.skip=true;destinations.push({name:w,sourceStart:t.start,sourceEnd:t.end,ignorable:star});star=false;continue}
+    if(star){state.destination=w;state.skip=true;destinations.push({name:w,sourceStart:t.start,sourceEnd:t.end,ignorable:true});star=false;continue}
     if(w==='uc'&&p!==null){state.uc=Math.max(0,p);continue}
     if(state.skip)continue
     if(w==='b')state.style.bold=p!==0;else if(w==='i')state.style.italic=p!==0;else if(w==='ul')state.style.underline=p!==0;else if(w==='ulnone')state.style.underline=false
