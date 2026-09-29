@@ -1,11 +1,12 @@
 import {parseRtfTree,type RtfNode,type RtfDiagnostic} from './rtfParser'
 import type {RtfToken} from './rtfLexer'
-export type RtfModelFont={index:number;name:string}
-export type RtfModelColor={index:number;red:number;green:number;blue:number}
+export type RtfModelFont={index:number;name:string;sourceStart:number;sourceEnd:number}
+export type RtfModelColor={index:number;red:number;green:number;blue:number;sourceStart:number;sourceEnd:number}
 export type RtfStyleProperty=keyof RtfComputedStyle
 export type RtfProvenanceKind='applied'|'reset'|'override'|'restored'
 export type RtfPropertyOrigin={property:RtfStyleProperty;value:RtfComputedStyle[RtfStyleProperty];control:string;sourceStart:number;sourceEnd:number;kind:'applied'|'reset'}
-export type RtfProvenanceEvent={property:RtfStyleProperty;value:RtfComputedStyle[RtfStyleProperty];previousValue:RtfComputedStyle[RtfStyleProperty];control:string;sourceStart:number;sourceEnd:number;kind:RtfProvenanceKind;groupStart:number;groupEnd:number|null}
+export type RtfReferenceTarget={kind:'font'|'color';index:number;label:string;sourceStart:number;sourceEnd:number}
+export type RtfProvenanceEvent={property:RtfStyleProperty;value:RtfComputedStyle[RtfStyleProperty];previousValue:RtfComputedStyle[RtfStyleProperty];control:string;sourceStart:number;sourceEnd:number;kind:RtfProvenanceKind;groupStart:number;groupEnd:number|null;reference?:RtfReferenceTarget}
 export type RtfComputedStyle={bold:boolean;italic:boolean;underline:boolean;font:number|null;fontSizeHalfPoints:number|null;foregroundColor:number|null;backgroundColor:number|null;alignment:'left'|'center'|'right'|'justify'}
 export type RtfModelRun={text:string;start:number;end:number;sourceStart:number;sourceEnd:number;style:RtfComputedStyle;origins:Partial<Record<RtfStyleProperty,RtfPropertyOrigin>>;history:Partial<Record<RtfStyleProperty,RtfProvenanceEvent[]>>;sourceTokens:RtfToken[]}
 export type RtfParagraph={index:number;start:number;end:number;sourceStart:number;sourceEnd:number;runs:RtfModelRun[];alignment:RtfComputedStyle['alignment']}
@@ -48,8 +49,11 @@ export function buildRtfModel(source:string):RtfModel{
  const flush=()=>{if(!current.length)return;const first=current[0],last=current.at(-1)!;paragraphs.push({index:paragraphs.length,start:first.start,end:last.end,sourceStart:first.sourceStart,sourceEnd:last.sourceEnd,runs:current,alignment:first.style.alignment});current=[]}
  for(const run of runs){current.push(run);if(run.text.includes('\n'))flush()}flush()
  const fontGroup=findDestinationGroup(tree.children,'fonttbl'),colorGroup=findDestinationGroup(tree.children,'colortbl')
- return {source,paragraphs,runs,destinations,fonts:fontGroup?parseFonts(source.slice(fontGroup.start,fontGroup.end)):[],colors:colorGroup?parseColors(source.slice(colorGroup.start,colorGroup.end)):[],diagnostics:tree.diagnostics}
+ const fonts=fontGroup?parseFonts(source,fontGroup.start,fontGroup.end):[],colors=colorGroup?parseColors(source,colorGroup.start,colorGroup.end):[]
+ const referenceFor=(property:RtfStyleProperty,value:RtfComputedStyle[RtfStyleProperty]):RtfReferenceTarget|undefined=>{if(property==='font'&&typeof value==='number'){const x=fonts.find(f=>f.index===value);if(x)return {kind:'font',index:x.index,label:x.name,sourceStart:x.sourceStart,sourceEnd:x.sourceEnd}}if((property==='foregroundColor'||property==='backgroundColor')&&typeof value==='number'){const x=colors.find(c=>c.index===value);if(x)return {kind:'color',index:x.index,label:`RGB(${x.red}, ${x.green}, ${x.blue})`,sourceStart:x.sourceStart,sourceEnd:x.sourceEnd}}}
+ for(const run of runs)for(const property of Object.keys(run.history) as RtfStyleProperty[])for(const event of run.history[property]||[]){const ref=referenceFor(property,event.value);if(ref)event.reference=ref}
+ return {source,paragraphs,runs,destinations,fonts,colors,diagnostics:tree.diagnostics}
 }
 function findDestinationGroup(nodes:RtfNode[],name:string):Extract<RtfNode,{type:'group'}>|null{for(const n of nodes)if(n.type==='group'){if(n.children.some(x=>x.type==='token'&&x.token.type==='control-word'&&x.token.word===name))return n;const f=findDestinationGroup(n.children,name);if(f)return f}return null}
-function parseFonts(s:string):RtfModelFont[]{const out:RtfModelFont[]=[];for(const m of s.matchAll(/\{\\f(\d+)[\s\S]*? ([^;{}]+);}/g))out.push({index:Number(m[1]),name:m[2].trim()});return out}
-function parseColors(s:string):RtfModelColor[]{const out:RtfModelColor[]=[];s.replace(/^\{\\colortbl\s*/,'').replace(/}.*$/s,'').split(';').forEach((e,index)=>{const r=e.match(/\\red(\d+)/),g=e.match(/\\green(\d+)/),b=e.match(/\\blue(\d+)/);if(r||g||b)out.push({index,red:Number(r?.[1]||0),green:Number(g?.[1]||0),blue:Number(b?.[1]||0)})});return out}
+function parseFonts(source:string,start:number,end:number):RtfModelFont[]{const s=source.slice(start,end),out:RtfModelFont[]=[];for(const m of s.matchAll(/\{\\f(\d+)[\s\S]*? ([^;{}]+);}/g)){const sourceStart=start+m.index!,sourceEnd=sourceStart+m[0].length;out.push({index:Number(m[1]),name:m[2].trim(),sourceStart,sourceEnd})}return out}
+function parseColors(source:string,start:number,end:number):RtfModelColor[]{const s=source.slice(start,end),out:RtfModelColor[]=[];let entryStart=0,index=0;for(let i=0;i<=s.length;i++)if(i===s.length||s[i]===';'){const e=s.slice(entryStart,i),r=e.match(/\\red(\d+)/),g=e.match(/\\green(\d+)/),b=e.match(/\\blue(\d+)/);if(r||g||b)out.push({index,red:Number(r?.[1]||0),green:Number(g?.[1]||0),blue:Number(b?.[1]||0),sourceStart:start+entryStart,sourceEnd:start+i+1});index++;entryStart=i+1}return out}
