@@ -1,3 +1,4 @@
+import {buildRtfModel,type RtfModel} from './rtfModel'
 
 export type RtfFont={index:number;name:string;family:string|null;charset:number|null}
 export type RtfColor={index:number;red:number;green:number;blue:number}
@@ -52,7 +53,7 @@ export function parseRtfRuns(raw:string):RtfRun[]{
  return runs.filter(r=>r.text.length>0)
 }
 
-export type RtfStats={rawBytes:number;controlWords:number;groups:number;hexEscapes:number;unicodeEscapes:number;pictures:number;objects:number;fontTableChars:number;colorTableChars:number;plainText:string;formatting:RtfFormatting;runs:RtfRun[];fonts:RtfFont[];colors:RtfColor[]}
+export type RtfStats={rawBytes:number;controlWords:number;groups:number;hexEscapes:number;unicodeEscapes:number;pictures:number;objects:number;fontTableChars:number;colorTableChars:number;plainText:string;formatting:RtfFormatting;runs:RtfRun[];fonts:RtfFont[];colors:RtfColor[];model:RtfModel}
 const count=(s:string,r:RegExp)=>(s.match(r)||[]).length
 export function inspectRtf(raw:string,rawBytes:number):RtfStats{
  const table=(name:string)=>{const m=raw.match(new RegExp('\\\\'+name+'[\\s\\S]*?\\}')); return m?.[0].length||0}
@@ -64,7 +65,7 @@ export function inspectRtf(raw:string,rawBytes:number):RtfStats{
   .replace(/\\'([0-9a-f]{2})/gi,(_,h)=>String.fromCharCode(parseInt(h,16)))
   .replace(/\\[a-z]+-?\d* ?/gi,'').replace(/\\[{}\\]/g,m=>m.slice(1)).replace(/[{}]/g,'')
  const formatting:RtfFormatting={bold:count(raw,/\\b(?:0)?\b/g),italic:count(raw,/\\i(?:0)?\b/g),underline:count(raw,/\\ul(?:none|0)?\b/g),font:count(raw,/\\f\d+\b/g),fontSize:count(raw,/\\fs\d+\b/g),foregroundColor:count(raw,/\\cf\d+\b/g),backgroundColor:count(raw,/\\(?:highlight|cb)\d+\b/g),alignLeft:count(raw,/\\ql\b/g),alignCenter:count(raw,/\\qc\b/g),alignRight:count(raw,/\\qr\b/g),alignJustify:count(raw,/\\qj\b/g),paragraphs:count(raw,/\\par\b/g),lists:count(raw,/\\(?:listtext|ls\d+)\b/g)}
- return {rawBytes,controlWords:count(raw,/\\[a-z]+-?\d* ?/gi),groups:count(raw,/\{/g),hexEscapes:count(raw,/\\'[0-9a-f]{2}/gi),unicodeEscapes:count(raw,/\\u-?\d+\??/gi),pictures:count(raw,/\\pict\b/gi),objects:count(raw,/\\object\b/gi),fontTableChars:table('fonttbl'),colorTableChars:table('colortbl'),plainText:plain.trim(),formatting,runs:parseRtfRuns(raw),fonts:parseFontTable(raw),colors:parseColorTable(raw)}
+ return {rawBytes,controlWords:count(raw,/\\[a-z]+-?\d* ?/gi),groups:count(raw,/\{/g),hexEscapes:count(raw,/\\'[0-9a-f]{2}/gi),unicodeEscapes:count(raw,/\\u-?\d+\??/gi),pictures:count(raw,/\\pict\b/gi),objects:count(raw,/\\object\b/gi),fontTableChars:table('fonttbl'),colorTableChars:table('colortbl'),plainText:plain.trim(),formatting,runs:parseRtfRuns(raw),fonts:parseFontTable(raw),colors:parseColorTable(raw),model:buildRtfModel(raw)}
 }
 
 export type RtfComparison={formattingChanges:string[];rawByteDelta:number;visibleUtf8Delta:number;visibleGraphemeDelta:number;controlWordDelta:number;groupDelta:number;unicodeEscapeDelta:number;hexEscapeDelta:number;pictureDelta:number;objectDelta:number;fontTableDelta:number;colorTableDelta:number;lessons:string[]}
