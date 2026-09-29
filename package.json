@@ -5,13 +5,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@vitejs/plugin-vue": "latest",
-    "vite": "latest",
-    "vue": "latest"
+    "@vitejs/plugin-vue": "6.0.1",
+    "vite": "7.1.7",
+    "vue": "3.5.21"
   },
   "devDependencies": {
-    "typescript": "latest",
-    "vue-tsc": "latest",
-    "vitest": "latest"
+    "typescript": "5.9.2",
+    "vue-tsc": "3.0.7",
+    "vitest": "3.2.4"
   }
 }
