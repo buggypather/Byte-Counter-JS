@@ -7,7 +7,7 @@ const open=ref(new Set<string>(['0']))
 const tree=computed(()=>parseRtfTree(props.source))
 function key(n:RtfNode){return n.start+':'+n.end}
 function toggle(n:RtfNode){const k=key(n),s=new Set(open.value);s.has(k)?s.delete(k):s.add(k);open.value=s}
-function label(n:RtfNode){if(n.type==='group'){const first=n.children.find(x=>x.type==='token'&&x.token.type==='control-word');return first&&first.type==='token'?'{ '+String.raw`\`+first.token.word+(first.token.parameter??'')+' … }':'{ group … }'}const t=n.token;if(t.type==='text')return JSON.stringify(t.raw.length>34?t.raw.slice(0,34)+'…':t.raw);return t.raw.trim()||t.type}
+function label(n:RtfNode){if(n.type==='group'){const first=n.children.find(x=>x.type==='token'&&x.token.type==='control-word');return first&&first.type==='token'?'{ '+'\\'+first.token.word+(first.token.parameter??'')+' … }':'{ group … }'}const t=n.token;if(t.type==='text')return JSON.stringify(t.raw.length>34?t.raw.slice(0,34)+'…':t.raw);return t.raw.trim()||t.type}
 function selected(n:RtfNode){return props.selectedStart!==null&&n.start<=props.selectedStart!&&n.end>=props.selectedEnd!}
 </script>
 <template><div class="rtf-tree"><div class="tree-title">DOCUMENT TREE <span>{{tree.tokens.length}} tokens</span></div><div v-if="tree.diagnostics.length" class="tree-diagnostics"><span v-for="d in tree.diagnostics">{{d.severity}}: {{d.message}} @ {{d.start}}</span></div><template v-for="n in tree.children" :key="key(n)"><TreeNode :node="n" :depth="0" :open="open" :selected-start="selectedStart" :selected-end="selectedEnd" @toggle="toggle" @select="(a,b)=>emit('select',a,b)"/></template></div></template>
