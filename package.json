@@ -12,6 +12,7 @@
   "devDependencies": {
     "typescript": "5.9.2",
     "vue-tsc": "3.0.7",
-    "vitest": "3.2.4"
+    "vitest": "3.2.4",
+    "@types/node": "22.18.6"
   }
 }
